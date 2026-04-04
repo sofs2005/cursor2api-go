@@ -33,7 +33,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imroc/req/v3"
@@ -46,14 +49,29 @@ const cursorAPIURL = "https://cursor.com/api/chat"
 type CursorService struct {
 	config          *config.Config
 	client          *req.Client
+	mainJS          string
+	envJS           string
 	headerGenerator *utils.HeaderGenerator
+	scriptCache     string
+	scriptCacheTime time.Time
+	scriptMutex     sync.RWMutex
 }
 
 // NewCursorService creates a new service instance.
 func NewCursorService(cfg *config.Config) *CursorService {
+	mainJS, err := os.ReadFile(filepath.Join("jscode", "main.js"))
+	if err != nil {
+		logrus.Fatalf("failed to read jscode/main.js: %v", err)
+	}
+
+	envJS, err := os.ReadFile(filepath.Join("jscode", "env.js"))
+	if err != nil {
+		logrus.Fatalf("failed to read jscode/env.js: %v", err)
+	}
+
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		logrus.Warnf("Failed to create cookie jar: %v", err)
+		logrus.Warnf("failed to create cookie jar: %v", err)
 	}
 
 	client := req.C()
@@ -66,6 +84,8 @@ func NewCursorService(cfg *config.Config) *CursorService {
 	return &CursorService{
 		config:          cfg,
 		client:          client,
+		mainJS:          string(mainJS),
+		envJS:           string(envJS),
 		headerGenerator: utils.NewHeaderGenerator(),
 	}
 }
@@ -84,7 +104,16 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 
 	maxRetries := 2
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		xIsHuman := utils.GenerateRandomString(64)
+		xIsHuman, err := s.fetchXIsHuman(ctx)
+		if err != nil {
+			if attempt < maxRetries {
+				logrus.WithError(err).Warnf("Failed to fetch x-is-human token (attempt %d/%d), retrying...", attempt, maxRetries)
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			return nil, err
+		}
+
 		headers := s.chatHeaders(xIsHuman)
 
 		logrus.WithFields(logrus.Fields{
@@ -123,6 +152,11 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 			if resp.StatusCode == http.StatusForbidden && attempt < maxRetries {
 				logrus.Warn("Received 403, refreshing browser fingerprint...")
 				s.headerGenerator.Refresh()
+				// Clear script cache to force re-fetch
+				s.scriptMutex.Lock()
+				s.scriptCache = ""
+				s.scriptCacheTime = time.Time{}
+				s.scriptMutex.Unlock()
 				continue
 			}
 
@@ -361,6 +395,79 @@ func (s *CursorService) consumeSSE(ctx context.Context, resp *http.Response, out
 	flushParser()
 }
 
+func (s *CursorService) fetchXIsHuman(ctx context.Context) (string, error) {
+	s.scriptMutex.RLock()
+	cached := s.scriptCache
+	cachedTime := s.scriptCacheTime
+	s.scriptMutex.RUnlock()
+
+	// Cache for 5 minutes
+	if cached != "" && time.Since(cachedTime) < 5*time.Minute {
+		return cached, nil
+	}
+
+	s.scriptMutex.Lock()
+	defer s.scriptMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if s.scriptCache != "" && time.Since(s.scriptCacheTime) < 5*time.Minute {
+		return s.scriptCache, nil
+	}
+
+	cursorJS, err := s.fetchCursorScript(ctx)
+	if err != nil {
+		// If fetch fails, fall back to random token
+		logrus.WithError(err).Warn("Failed to fetch cursor script, using random token")
+		token := utils.GenerateRandomString(64)
+		s.scriptCache = token
+		s.scriptCacheTime = time.Now()
+		return token, nil
+	}
+
+	jsCode := s.prepareJS(cursorJS)
+	result, err := utils.RunJS(jsCode)
+	if err != nil {
+		logrus.WithError(err).Warn("Failed to execute cursor JS, using random token")
+		token := utils.GenerateRandomString(64)
+		s.scriptCache = token
+		s.scriptCacheTime = time.Now()
+		return token, nil
+	}
+
+	s.scriptCache = result
+	s.scriptCacheTime = time.Now()
+	return result, nil
+}
+
+func (s *CursorService) fetchCursorScript(ctx context.Context) (string, error) {
+	headers := s.scriptHeaders()
+	resp, err := s.client.R().
+		SetContext(ctx).
+		SetHeaders(headers).
+		Get(s.config.ScriptURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch cursor script: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("cursor script returned %d", resp.StatusCode)
+	}
+	return resp.String(), nil
+}
+
+func (s *CursorService) prepareJS(cursorJS string) string {
+	replacer := strings.NewReplacer(
+		"$$currentScriptSrc$$", s.config.ScriptURL,
+		"$$UNMASKED_VENDOR_WEBGL$$", s.config.FP.UNMASKED_VENDOR_WEBGL,
+		"$$UNMASKED_RENDERER_WEBGL$$", s.config.FP.UNMASKED_RENDERER_WEBGL,
+		"$$userAgent$$", s.config.FP.UserAgent,
+	)
+
+	mainScript := replacer.Replace(s.mainJS)
+	mainScript = strings.Replace(mainScript, "$$env_jscode$$", s.envJS, 1)
+	mainScript = strings.Replace(mainScript, "$$cursor_jscode$$", cursorJS, 1)
+	return mainScript
+}
+
 func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) []models.CursorMessage {
 	if len(messages) == 0 || s.config.MaxInputLength <= 0 {
 		return messages
@@ -422,4 +529,8 @@ func cursorMessageTextLength(msg models.CursorMessage) int {
 
 func (s *CursorService) chatHeaders(xIsHuman string) map[string]string {
 	return s.headerGenerator.GetChatHeaders(xIsHuman)
+}
+
+func (s *CursorService) scriptHeaders() map[string]string {
+	return s.headerGenerator.GetScriptHeaders()
 }

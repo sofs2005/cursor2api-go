@@ -37,8 +37,8 @@ type BrowserProfile struct {
 	Mobile          bool
 }
 
-// Common browser versions (Chrome)
-var chromeVersions = []int{120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135}
+// Chrome 版本范围 (已更新至 146)
+var chromeVersions = []int{140, 141, 142, 143, 144, 145, 146}
 
 // Windows 平台配置
 var windowsProfiles = []BrowserProfile{
@@ -52,6 +52,7 @@ var macosProfiles = []BrowserProfile{
 	{Platform: "macOS", PlatformVersion: "13.0.0", Architecture: "arm", Bitness: "64"},
 	{Platform: "macOS", PlatformVersion: "14.0.0", Architecture: "arm", Bitness: "64"},
 	{Platform: "macOS", PlatformVersion: "15.0.0", Architecture: "arm", Bitness: "64"},
+	{Platform: "macOS", PlatformVersion: "15.5.0", Architecture: "arm", Bitness: "64"},
 	{Platform: "macOS", PlatformVersion: "13.0.0", Architecture: "x86", Bitness: "64"},
 	{Platform: "macOS", PlatformVersion: "14.0.0", Architecture: "x86", Bitness: "64"},
 }
@@ -111,36 +112,32 @@ func generateUserAgent(profile BrowserProfile) string {
 		ua, profile.ChromeVersion)
 }
 
-// GetChatHeaders 获取聊天请求的 headers
+// GetChatHeaders 获取聊天请求的 headers (匹配真实浏览器 curl)
 func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
-	langs := []string{"en-US,en;q=0.9", "zh-CN,zh;q=0.9,en;q=0.8", "en-GB,en;q=0.9"}
+	langs := []string{"zh-CN,zh;q=0.9", "en-US,en;q=0.9", "en-GB,en;q=0.9"}
 	refs := []string{
 		"https://cursor.com/en-US/learn/how-ai-models-work",
-		"https://cursor.com/cn/learn/how-ai-models-work",
 		"https://cursor.com/",
 	}
 
 	headers := map[string]string{
-		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, g.profile.Platform),
-		"x-path":             "/api/chat",
-		"Referer":            refs[rand.IntN(len(refs))],
-		"sec-ch-ua":          g.getSecChUa(),
-		"x-method":           "POST",
-		"sec-ch-ua-mobile":   "?0",
-		"x-is-human":         xIsHuman,
-		"User-Agent":         g.profile.UserAgent,
-		"content-type":       "application/json",
-		"accept-language":    langs[rand.IntN(len(langs))],
-	}
-
-	if g.profile.Architecture != "" {
-		headers["sec-ch-ua-arch"] = fmt.Sprintf(`"%s"`, g.profile.Architecture)
-	}
-	if g.profile.Bitness != "" {
-		headers["sec-ch-ua-bitness"] = fmt.Sprintf(`"%s"`, g.profile.Bitness)
-	}
-	if g.profile.PlatformVersion != "" {
-		headers["sec-ch-ua-platform-version"] = fmt.Sprintf(`"%s"`, g.profile.PlatformVersion)
+		"accept":                     "*/*",
+		"accept-language":            langs[rand.IntN(len(langs))],
+		"content-type":               "application/json",
+		"origin":                     "https://cursor.com",
+		"priority":                   "u=1, i",
+		"referer":                    refs[rand.IntN(len(refs))],
+		"sec-ch-ua":                  fmt.Sprintf(`"Chromium";v="%d", "Not-A.Brand";v="24", "Google Chrome";v="%d"`, g.chromeVersion, g.chromeVersion),
+		"sec-ch-ua-arch":             fmt.Sprintf(`"%s"`, g.profile.Architecture),
+		"sec-ch-ua-bitness":          fmt.Sprintf(`"%s"`, g.profile.Bitness),
+		"sec-ch-ua-mobile":           "?0",
+		"sec-ch-ua-platform":         fmt.Sprintf(`"%s"`, g.profile.Platform),
+		"sec-ch-ua-platform-version": fmt.Sprintf(`"%s"`, g.profile.PlatformVersion),
+		"sec-fetch-dest":             "empty",
+		"sec-fetch-mode":             "cors",
+		"sec-fetch-site":             "same-origin",
+		"user-agent":                 g.profile.UserAgent,
+		"x-is-human":                 xIsHuman,
 	}
 
 	return headers
@@ -148,7 +145,7 @@ func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
 
 // GetScriptHeaders 获取脚本请求的 headers
 func (g *HeaderGenerator) GetScriptHeaders() map[string]string {
-	langs := []string{"en-US,en;q=0.9", "zh-CN,zh;q=0.9,en;q=0.8", "en-GB,en;q=0.9"}
+	langs := []string{"zh-CN,zh;q=0.9", "en-US,en;q=0.9", "en-GB,en;q=0.9"}
 	refs := []string{
 		"https://cursor.com/cn/learn/how-ai-models-work",
 		"https://cursor.com/en-US/learn/how-ai-models-work",
@@ -156,31 +153,22 @@ func (g *HeaderGenerator) GetScriptHeaders() map[string]string {
 	}
 
 	headers := map[string]string{
-		"User-Agent":         g.profile.UserAgent,
-		"sec-ch-ua-arch":     fmt.Sprintf(`"%s"`, g.profile.Architecture),
-		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, g.profile.Platform),
-		"sec-ch-ua":          g.getSecChUa(),
-		"sec-ch-ua-bitness":  fmt.Sprintf(`"%s"`, g.profile.Bitness),
-		"sec-ch-ua-mobile":   "?0",
-		"sec-fetch-site":     "same-origin",
-		"sec-fetch-mode":     "no-cors",
-		"sec-fetch-dest":     "script",
-		"referer":            refs[rand.IntN(len(refs))],
-		"accept-language":    langs[rand.IntN(len(langs))],
-	}
-
-	if g.profile.PlatformVersion != "" {
-		headers["sec-ch-ua-platform-version"] = fmt.Sprintf(`"%s"`, g.profile.PlatformVersion)
+		"accept":                     "*/*",
+		"accept-language":            langs[rand.IntN(len(langs))],
+		"referer":                    refs[rand.IntN(len(refs))],
+		"sec-ch-ua":                  fmt.Sprintf(`"Chromium";v="%d", "Not-A.Brand";v="24", "Google Chrome";v="%d"`, g.chromeVersion, g.chromeVersion),
+		"sec-ch-ua-arch":             fmt.Sprintf(`"%s"`, g.profile.Architecture),
+		"sec-ch-ua-bitness":          fmt.Sprintf(`"%s"`, g.profile.Bitness),
+		"sec-ch-ua-mobile":           "?0",
+		"sec-ch-ua-platform":         fmt.Sprintf(`"%s"`, g.profile.Platform),
+		"sec-ch-ua-platform-version": fmt.Sprintf(`"%s"`, g.profile.PlatformVersion),
+		"sec-fetch-dest":             "script",
+		"sec-fetch-mode":             "no-cors",
+		"sec-fetch-site":             "same-origin",
+		"user-agent":                 g.profile.UserAgent,
 	}
 
 	return headers
-}
-
-// getSecChUa 生成 sec-ch-ua header
-func (g *HeaderGenerator) getSecChUa() string {
-	notABrand := 24 + rand.IntN(10) // 24-33
-	return fmt.Sprintf(`"Google Chrome";v="%d", "Chromium";v="%d", "Not(A:Brand";v="%d"`,
-		g.chromeVersion, g.chromeVersion, notABrand)
 }
 
 // GetUserAgent 获取 User-Agent

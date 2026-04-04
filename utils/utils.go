@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -250,6 +251,31 @@ func SafeStreamWrapper(handler func(*gin.Context, <-chan interface{}, string), c
 	}()
 
 	handler(c, buffered, modelName)
+}
+
+// RunJS 执行JavaScript代码并返回标准输出内容
+func RunJS(jsCode string) (string, error) {
+	finalJS := `const crypto = require('crypto').webcrypto;
+global.crypto = crypto;
+globalThis.crypto = crypto;
+if (typeof window === 'undefined') { global.window = global; }
+window.crypto = crypto;
+this.crypto = crypto;
+` + jsCode
+
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(finalJS)
+
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("node.js execution failed (exit code: %d)\nSTDOUT:\n%s\nSTDERR:\n%s",
+				exitErr.ExitCode(), string(output), string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("failed to execute node.js: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 // stringPtr 返回字符串指针
