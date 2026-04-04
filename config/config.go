@@ -44,6 +44,8 @@ const (
 	EnvKiloToolStrict     = "KILO_TOOL_STRICT"
 	EnvScriptURL          = "SCRIPT_URL"
 	EnvCursorCookie       = "CURSOR_COOKIE"
+	EnvCursorEmail        = "CURSOR_EMAIL"
+	EnvCursorPassword     = "CURSOR_PASSWORD"
 	EnvUserAgent          = "USER_AGENT"
 	EnvVendorWebGL        = "UNMASKED_VENDOR_WEBGL"
 	EnvRendererWebGL      = "UNMASKED_RENDERER_WEBGL"
@@ -60,6 +62,8 @@ const (
 	DefaultKiloToolStrict = false
 	DefaultScriptURL      = "https://cursor.com/_next/static/chunks/pages/_app.js"
 	DefaultCursorCookie   = ""
+	DefaultCursorEmail    = ""
+	DefaultCursorPassword = ""
 	DefaultUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 	DefaultVendorWebGL    = "Google Inc. (Intel)"
 	DefaultRendererWebGL  = "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"
@@ -84,9 +88,11 @@ type Config struct {
 	KiloToolStrict bool `json:"kilo_tool_strict"`
 
 	// Cursor相关配置
-	ScriptURL    string `json:"script_url"`
-	CursorCookie string `json:"-"` // never serialize cookie
-	FP           FP     `json:"fp"`
+	ScriptURL      string `json:"script_url"`
+	CursorCookie   string `json:"-"` // never serialize cookie
+	CursorEmail    string `json:"-"` // never serialize email
+	CursorPassword string `json:"-"` // never serialize password
+	FP             FP     `json:"fp"`
 }
 
 // FP 指纹配置结构
@@ -112,6 +118,8 @@ func LoadConfig() (*Config, error) {
 		KiloToolStrict:     getEnvAsBool(EnvKiloToolStrict, DefaultKiloToolStrict),
 		ScriptURL:          getEnv(EnvScriptURL, DefaultScriptURL),
 		CursorCookie:       getEnv(EnvCursorCookie, DefaultCursorCookie),
+		CursorEmail:        getEnv(EnvCursorEmail, DefaultCursorEmail),
+		CursorPassword:     getEnv(EnvCursorPassword, DefaultCursorPassword),
 		FP: FP{
 			UserAgent:               getEnv(EnvUserAgent, DefaultUserAgent),
 			UNMASKED_VENDOR_WEBGL:   getEnv(EnvVendorWebGL, DefaultVendorWebGL),
